@@ -1,0 +1,11 @@
+/test/reports
+.DS_Store
+*.swp
+/composer.lock
+/vendor
+/.idea/misc.xml
+/.idea/workspace.xml
+/.idea/copyright/
+/.idea/dictionaries/
+/.idea/uiDesigner.xml
+

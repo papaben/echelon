@@ -1,0 +1,21 @@
+{
+  "name": "Echelon",
+  "description": "A straightforward database schema migration manager",
+  "keywords": [],
+  "homepage": "https://github.com/box/echelon/wiki",
+  "type": "php",
+  "license": "Apache 2.0",
+  "authors": [
+    {
+      "name": "Benjamin VanEvery",
+      "email": "vanevery@gmail.com",
+      "homepage": "http://asheepapart.blogspot.com"
+    }
+  ],
+  "require": {
+    "php": ">=5.3.0",
+    "box/bart" : "dev-master",
+    "box/shmock" : "dev-master"
+  }
+}
+
