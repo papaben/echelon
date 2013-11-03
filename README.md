@@ -15,6 +15,12 @@ Database schema migrations, henceforth referred to as "migrations", are discrete
 Instructions
 ------------
 
+System Dependencies
+------------
+------------
+`Logger` log4php provided by Pear
+`Composer` Use the (Composer)[http://getcomposer.org/] Tool to install all composable dependencies
+
 __TO DO__
 * Configurations
  * Schema migrations home
