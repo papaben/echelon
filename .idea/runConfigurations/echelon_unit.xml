@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="echelon unit" type="PHPUnitRunConfigurationType" factoryName="PHPUnit">
+    <TestRunner configuration_file="$PROJECT_DIR$/phpunit.xml" directory="$PROJECT_DIR$/test" use_alternative_configuration_file="true" />
+    <RunnerSettings RunnerId="PhpRunner" />
+    <ConfigurationWrapper RunnerId="PhpRunner" />
+    <method />
+  </configuration>
+</component>

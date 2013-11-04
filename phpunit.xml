@@ -1,0 +1,13 @@
+<phpunit
+	colors="true"
+	verbose="true"
+	bootstrap="test/test-bootstrap.php">
+      <filter>
+        <blacklist>
+          <directory suffix=".php">../vendor/</directory>
+          <directory suffix='.php'>/box/libexec/php/php/log4php/</directory>
+          <directory suffix='.php'>/usr/lib/php/pear/share/pear/</directory>
+        </blacklist>
+      </filter>
+</phpunit>
+

@@ -5,7 +5,7 @@ use Bart\Configuration\Configuration;
 /**
  * Configurations for the Echelon module
  */
-class Echelon_Configs extends Configuration
+class Echelon_Config extends Configuration
 {
 	/**
 	 * @return string Sample of how configuration is intended to be defined

@@ -38,7 +38,7 @@ class Migrator
 	{
 		$this->logger = \Logger::getLogger(__CLASS__);
 
-		/** @var \Box\Echelon\Echelon_Configs $configs */
+		/** @var \Box\Echelon\Echelon_Config $configs */
 		$configs = Diesel::create('\Box\Echelon\Echelon_Configs');
 		$this->db = $db;
 		$this->offline = $offline;
