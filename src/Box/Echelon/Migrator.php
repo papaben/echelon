@@ -252,7 +252,7 @@ class Migrator
 			}
 			catch (\Exception $e)
 			{
-				$this->logger->warn('Uh oh, migration encountered problem. Prematurely shutting down.', $e);
+				$this->logger->warn('Migration encountered problem. Prematurely shutting down.', $e);
 				throw $e;
 			}
 
@@ -344,14 +344,14 @@ class Migrator
 	 */
 	private function track_version_up(Migration_Proxy $migration)
 	{
-		self::info("# Tracking migrate up to {$migration}");
+		$this->logger->trace("Tracking migrate up to {$migration}");
 
 		// @note re-sort? Only if we need to re-display max version
 		$this->migrated_versions[$migration->get_version()] = $migration->get_name();
 
-		$this->db->execute('INSERT INTO ' . self::TBL_NAME
-			. ' (version, name) VALUES (?, ?)',
-			array($migration->get_version(), $migration->get_name()));
+		$sql = sprintf('INSERT INTO ' . self::TBL_NAME . " (version, name) VALUES ('%s', '%s')",
+			$migration->get_version(), $migration->get_name());
+		$this->db->execute($this->default_db_name, $sql);
 	}
 
 	/**
@@ -360,13 +360,15 @@ class Migrator
 	 */
 	private function track_version_down(Migration_Proxy $migration)
 	{
-		self::info("# Tracking rollback of {$migration}");
+		$this->logger->trace("Tracking rollback of {$migration}");
 
 		// version is no longer applied, remove and reset array
 		unset($this->migrated_versions[$migration->get_version()]);
 
-		$this->db->execute('DELETE FROM ' . self::TBL_NAME .
-		' WHERE version = ?', array($migration->get_version()));
+		$sql = sprintf('DELETE FROM ' . self::TBL_NAME . " WHERE version = '%s'",
+			$migration->get_version());
+
+		$this->db->execute($this->default_db_name, $sql);
 	}
 }
 
