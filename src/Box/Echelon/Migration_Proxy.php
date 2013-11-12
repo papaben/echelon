@@ -75,10 +75,10 @@ class Migration_Proxy
 	}
 
 	/**
-	 * @param Db_Wrapper $db_wrapper
+	 * @param Db_Facade $db_wrapper
 	 * @return Migrator_Migration_Base instance of requested migration class
 	 */
-	private function load(Db_Wrapper $db_wrapper)
+	private function load(Db_Facade $db_wrapper)
 	{
 		$dir = Migrator::get_migrations_dir();
 		require_once $dir . $this->file_name;
@@ -90,9 +90,9 @@ class Migration_Proxy
 
 	/**
 	 * Perform forward migration
-	 * @param Db_Wrapper $db_wrapper
+	 * @param Db_Facade $db_wrapper
 	 */
-	public function migrate_up(Db_Wrapper $db_wrapper)
+	public function migrate_up(Db_Facade $db_wrapper)
 	{
 		$migration = $this->load($db_wrapper);
 		$start_time = microtime(true);
@@ -104,9 +104,9 @@ class Migration_Proxy
 
 	/**
 	 * Perform rollback migration
-	 * @param Db_Wrapper $db_wrapper
+	 * @param Db_Facade $db_wrapper
 	 */
-	public function migrate_down(Db_Wrapper $db_wrapper)
+	public function migrate_down(Db_Facade $db_wrapper)
 	{
 		$migration = $this->load($db_wrapper);
 		$migration->down();
@@ -115,7 +115,7 @@ class Migration_Proxy
 	/**
 	 * Run db wrapper through any composition required per migration
 	 */
-	protected function tweak_db_wrapper(Db_Wrapper $db_wrapper)
+	protected function tweak_db_wrapper(Db_Facade $db_wrapper)
 	{
 		if (self::$analyze)
 		{

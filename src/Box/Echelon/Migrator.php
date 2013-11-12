@@ -1,6 +1,7 @@
 <?php
 namespace Box\Echelon;
 use Bart\Diesel;
+use Bart\Log4PHP;
 
 /**
  * Coordinates the actual migrations
@@ -14,9 +15,11 @@ class Migrator
 	const MAX_ROLLBACKS_ALLOWED = 2;
 	const TBL_NAME = 'schema_migrations';
 
-	private $offline;
-	protected $db;
-	protected $show_git_log = false;
+	/** @var \Box\Echelon\Db_Facade */
+	private $db;
+	/** @var string The name of the database handle to use for tracking schema migrations */
+	private $default_db_name;
+	private $show_git_log;
 
 	private $dump_schema = false;
 	private $migrations = array();
@@ -28,23 +31,32 @@ class Migrator
 	/**
 	 * @var string Directory to find the schema migration files
 	 */
-	protected static $migrations_root_dir;
+	protected $migrations_dir;
 
 	/**
-	 * @param Db_Wrapper $db Wrap access to database
-	 * @param $offline Boolean Migration should be run online or offline?
+	 * @param Db_Facade $db Wrap access to database
 	 */
-	public function __construct(Db_Wrapper $db, $offline = false, $show_git_log = false)
+	public function __construct(Db_Facade $db, $show_git_log = false)
 	{
-		$this->logger = \Logger::getLogger(__CLASS__);
+		$this->logger = Log4PHP::getLogger(__CLASS__);
 
 		/** @var \Box\Echelon\Echelon_Config $configs */
 		$configs = Diesel::create('\Box\Echelon\Echelon_Configs');
+		$this->migrations_dir = $configs->migrations_root_dir();
+		$this->default_db_name = $configs->default_database_name();
+
 		$this->db = $db;
-		$this->offline = $offline;
 		$this->show_git_log = $show_git_log;
+
 		$this->load_migrations();
 		$this->load_versions_from_db();
+
+		$this->logger->debug("Configured $this");
+	}
+
+	public function __toString()
+	{
+		return "migrator for {$this->migrations_dir}";
 	}
 
 	/**
@@ -110,6 +122,7 @@ class Migrator
 		}
 
 		$this->logger->trace('Diff completed');
+		return $diff;
 	}
 
 	/**
@@ -140,12 +153,10 @@ class Migrator
 	 */
 	private function load_migrations()
 	{
-		$dir = self::get_migrations_dir();
-
 		// find all php files in migrations sorted ASC
-		foreach (scandir($dir) as $file_name)
+		foreach (scandir($this->migrations_dir) as $file_name)
 		{
-			$proxy = Migrator_Migration_Proxy::create_or_not($file_name, $this->show_git_log);
+			$proxy = Migration_Proxy::create_or_not($file_name, $this->show_git_log);
 
 			// file name was a valid format?
 			if ($proxy != null)
@@ -161,13 +172,14 @@ class Migrator
 
 	private function load_versions_from_db()
 	{
-		$migs_db = DB_Manager::instance()->get_db_by_name('application', null, true);
+		$migs_db = Databases::get($this->default_db_name);
+		// $migs_db = DB_Manager::instance()->get_db_by_name('application', null, true);
 
 		$query = 'SELECT version, name FROM ' .
-				self::TBL_NAME .
-				' ORDER BY version';
+			self::TBL_NAME .
+			' ORDER BY version';
 
-		$versions = $migs_db->getAll($query);
+		$versions = $migs_db->query($query);
 
 		$this->migrated_versions = array();
 		foreach ($versions as $record)
@@ -179,63 +191,44 @@ class Migrator
 		$this->starting_max = $record;
 	}
 
+	/**
+	 * Call this the *very* first time you use the system to configure your
+	 * default database with the schema_migrations table
+	 */
 	public static function init_schema_table()
 	{
-		$migs_db = DB_Manager::instance()->get_db_by_name('application', null, true);
-		$sql = 'CREATE TABLE IF NOT EXISTS ' . self::TBL_NAME . ' (
+		/** @var \Box\Echelon\Echelon_Config $configs */
+		$configs = Diesel::create('\Box\Echelon\Echelon_Configs');
+		$default_db_name = $configs->default_database_name();
+
+		$migs_db = Databases::get($default_db_name);
+
+		$sql = '
+		CREATE TABLE IF NOT EXISTS ' . self::TBL_NAME . ' (
 			id INT(10) UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
 			version VARCHAR(22) NOT NULL,
 			name VARCHAR(255) NOT NULL
-		) ';
+		)';
 
 		$migs_db->query($sql);
 	}
 
 	/**
-	 * @param $msg String Log message if debugging
-	 */
-	public static function debug($msg)
-	{
-		if ($GLOBALS['console.params']['log_level'] & 2)
-		{
-			echo $msg . PHP_EOL;
-		}
-	}
-
-	/**
-	 * @param $msg String Log message if info logging enabled
-	 */
-	public static function info($msg)
-	{
-		if ($GLOBALS['console.params']['log_level'] & 1)
-		{
-			echo $msg . PHP_EOL;
-		}
-	}
-
-	/**
-	 * Run the migration.  Either upgrade or rollback the database
+	 * Run the migration. Either upgrade or rollback the database
 	 * @param  $upgrade
 	 */
 	private function run($upgrade)
 	{
 		$dir = $upgrade ? 'up' : 'down';
-		$migrate = 'migrate_' . $dir;
-		$track = 'track_version_' . $dir;
+		$migrate_method = 'migrate_' . $dir;
+		$track_method = 'track_version_' . $dir;
 
 		$max = $this->starting_max;
-		self::debug('Database has ' . sizeof($this->migrated_versions) .
-				" migration(s) applied; max is {$max['version']} - {$max['name']}");
-		self::debug('Found ' . sizeof($this->migrations) . ' migration(s) in migrations/');
-		self::debug('Determining unapplied/applied migrations');
-		self::debug("Beginning to migrate $dir");
-
-		if ($this->offline)
-		{
-			// Stop replication before offline migrations
-			$this->db->execute('STOP SLAVE SQL_THREAD');
-			$this->db->execute('SET SESSION SQL_LOG_BIN = 0');
-		}
+		$this->logger->debug('Database has ' . count($this->migrated_versions) .
+			" migration(s) applied; max is {$max['version']} - {$max['name']}");
+		$this->logger->debug('Found ' . count($this->migrations) . ' migration(s) in migrations/');
+		$this->logger->debug('Determining unapplied/applied migrations');
+		$this->logger->debug("Beginning to migrate $dir");
 
 		// run each migration in order as necessary
 		foreach ($this->migrations as $migration)
@@ -247,46 +240,38 @@ class Migrator
 
 			if ($this->is_completed($upgrade, $migration))
 			{
-				self::debug('Reached target version ' . $this->target_version);
+				$this->logger->debug('Reached target version ' . $this->target_version);
 				break;
 			}
 
 			try
 			{
 				// @NOTE no transaction support currently
-				self::debug('Migrating: ' . $migration);
-				$migration->$migrate($this->db);
+				$this->logger->debug('Migrating: ' . $migration);
+				$migration->$migrate_method($this->db);
 			}
-			catch (Exception $e)
+			catch (\Exception $e)
 			{
-				self::debug('Uh oh, migration encountered problem: ' . $e->getMessage());
-				self::debug('Prematurely shutting down migration');
-				self::debug('See application log (migration) for details');
+				$this->logger->warn('Uh oh, migration encountered problem. Prematurely shutting down.', $e);
 				throw $e;
 			}
 
 			// persist version to db
-			$this->$track($migration);
+			$this->$track_method($migration);
 			$this->dump_schema = true;
 
-			self::debug("Migrated $dir: version $migration");
+			$this->logger->debug("Migrated $dir: version $migration");
 		}
 
-		if ($this->offline)
-		{
-			// Migrations complete, time for slave to catch up
-			$this->db->execute('START SLAVE SQL_THREAD');
-		}
-
-		self::debug('Migration complete');
+		$this->logger->debug('Migration complete');
 	}
 
 	/**
 	 * @param  $is_up
-	 * @param Migrator_Migration_Proxy $migration
+	 * @param Migration_Proxy $migration
 	 * @return bool Is the rollback complete?
 	 */
-	private function is_completed($is_up, Migrator_Migration_Proxy $migration)
+	private function is_completed($is_up, Migration_Proxy $migration)
 	{
 		// migration is not complete if upgrading or rolling back to first revision
 		// @NOTE may want to raise an error when target version is undefined in this case
@@ -301,10 +286,10 @@ class Migrator
 
 	/**
 	 * @param  $is_up
-	 * @param Migrator_Migration_Proxy $migration
+	 * @param Migration_Proxy $migration
 	 * @return bool if this migration should be skipped
 	 */
-	private function should_skip($is_up, Migrator_Migration_Proxy $migration)
+	private function should_skip($is_up, Migration_Proxy $migration)
 	{
 		// skip applied migrations on upgrade
 		$is_migrated = array_key_exists($migration->get_version(), $this->migrated_versions);
@@ -316,7 +301,7 @@ class Migrator
 		// skip non-applied migrations on rollback
 		if (!$is_up && !$is_migrated)
 		{
-			self::debug('Version never applied, skipping roll back on: ' . $migration->get_version());
+			$this->logger->debug('Version never applied, skipping roll back on: ' . $migration->get_version());
 			return true;
 		}
 
@@ -355,9 +340,9 @@ class Migrator
 
 	/**
 	 * Track migration occurred in db and local store
-	 * @param Migrator_Migration_Proxy $migration
+	 * @param Migration_Proxy $migration
 	 */
-	private function track_version_up(Migrator_Migration_Proxy $migration)
+	private function track_version_up(Migration_Proxy $migration)
 	{
 		self::info("# Tracking migrate up to {$migration}");
 
@@ -365,15 +350,15 @@ class Migrator
 		$this->migrated_versions[$migration->get_version()] = $migration->get_name();
 
 		$this->db->execute('INSERT INTO ' . self::TBL_NAME
-					. ' (version, name) VALUES (?, ?)',
+			. ' (version, name) VALUES (?, ?)',
 			array($migration->get_version(), $migration->get_name()));
 	}
 
 	/**
 	 * Track migration occurred in db and local store
-	 * @param Migrator_Migration_Proxy $migration
+	 * @param Migration_Proxy $migration
 	 */
-	private function track_version_down(Migrator_Migration_Proxy $migration)
+	private function track_version_down(Migration_Proxy $migration)
 	{
 		self::info("# Tracking rollback of {$migration}");
 
@@ -381,7 +366,7 @@ class Migrator
 		unset($this->migrated_versions[$migration->get_version()]);
 
 		$this->db->execute('DELETE FROM ' . self::TBL_NAME .
-				' WHERE version = ?', array($migration->get_version()));
+		' WHERE version = ?', array($migration->get_version()));
 	}
 }
 
