@@ -2,6 +2,9 @@
 namespace Box\Echelon;
 use Bart\Diesel;
 use Bart\Log4PHP;
+use Box\Echelon\Versions\Applied_Versions;
+use Box\Echelon\Versions\Migrating_Forward;
+use Box\Echelon\Versions\Rolling_Backward;
 
 /**
  * Coordinates the actual migrations
@@ -13,24 +16,20 @@ class Migrator
 	 * @Note designed to avoid human error
 	 */
 	const MAX_ROLLBACKS_ALLOWED = 2;
-	const TBL_NAME = 'schema_migrations';
 
 	/** @var \Box\Echelon\Db_Facade */
 	private $db;
-	/** @var string The name of the database handle to use for tracking schema migrations */
-	private $default_db_name;
 	private $show_git_log;
 
 	private $dump_schema = false;
 	private $migrations = array();
-	private $migrated_versions;
-	private $starting_max;
-	// target version when rolling back
+	/** @var Applied_Versions The forward or backward auditor of the versions */
+	private $applied_versions;
+
+	/** @var string The target version used for roll backs */
 	private $target_version;
 
-	/**
-	 * @var string Directory to find the schema migration files
-	 */
+	/** @var string Directory in which to find the schema migration files */
 	protected $migrations_dir;
 
 	/**
@@ -43,13 +42,11 @@ class Migrator
 		/** @var \Box\Echelon\Echelon_Config $configs */
 		$configs = Diesel::create('\Box\Echelon\Echelon_Configs');
 		$this->migrations_dir = $configs->migrations_root_dir();
-		$this->default_db_name = $configs->default_database_name();
 
 		$this->db = $db;
 		$this->show_git_log = $show_git_log;
 
-		$this->load_migrations();
-		$this->load_versions_from_db();
+		$this->load_migrations_from_disk();
 
 		$this->logger->debug("Configured $this");
 	}
@@ -64,6 +61,7 @@ class Migrator
 	 */
 	public function migrate_up()
 	{
+		$this->applied_versions = new Migrating_Forward($this->db);
 		$this->run(true);
 	}
 
@@ -82,6 +80,7 @@ class Migrator
 			throw new Migration_Exception('Target version exceeds rollback limit');
 		}
 
+		$this->applied_versions = new Rolling_Backward($this->db);
 		$this->run(false);
 	}
 
@@ -95,34 +94,9 @@ class Migrator
 	 */
 	public function get_diff()
 	{
-		$migrated_file_versions = array();
+		$applied_versions = new Migrating_Forward($this->db);
 
-		$this->logger->debug('Looking for migration files that have NOT been run (unapplied)');
-		$diff = array(
-			'unapplied' => array(),
-			'unknown' => array(),
-		);
-		foreach ($this->migrations as $migration)
-		{
-			if (array_key_exists($migration->get_version(), $this->migrated_versions))
-			{
-				$migrated_file_versions[] = $migration->get_version();
-				continue;
-			}
-
-			$diff['unapplied'][] = $migration;
-		}
-
-		$this->logger->debug('Looking for applied migs that do not have migration files (unknown)');
-		foreach ($this->migrated_versions as $version => $name)
-		{
-			if (in_array($version, $migrated_file_versions)) continue;
-
-			$diff['unapplied'][] = "{$version} {$name}";
-		}
-
-		$this->logger->trace('Diff completed');
-		return $diff;
+		return $applied_versions->get_diff($this->migrations);
 	}
 
 	/**
@@ -135,6 +109,9 @@ class Migrator
 	{
 		$this->logger->debug('Beginning to backfill untracked migrations.');
 
+		// Do not clobber class scope of this variable
+		$applied_versions = new Migrating_Forward($this->db);
+
 		foreach ($this->migrations as $migration)
 		{
 			if ($this->should_skip(true, $migration))
@@ -144,14 +121,14 @@ class Migrator
 			}
 
 			$this->logger->debug("Tracking $migration");
-			$this->track_version_up($migration);
+			$applied_versions->track_version_affected($migration);
 		}
 	}
 
 	/**
 	 * Load all files from the migrations directory and wrap them in proxies
 	 */
-	private function load_migrations()
+	private function load_migrations_from_disk()
 	{
 		// find all php files in migrations sorted ASC
 		foreach (scandir($this->migrations_dir) as $file_name)
@@ -161,7 +138,7 @@ class Migrator
 			// file name was a valid format?
 			if ($proxy != null)
 			{
-				self::info("Loaded $proxy");
+				$this->logger->debug("Loaded $proxy");
 				$this->migrations[] = $proxy;
 			}
 		}
@@ -170,67 +147,19 @@ class Migrator
 		sort($this->migrations);
 	}
 
-	private function load_versions_from_db()
-	{
-		$migs_db = Databases::get($this->default_db_name);
-		// $migs_db = DB_Manager::instance()->get_db_by_name('application', null, true);
-
-		$query = 'SELECT version, name FROM ' .
-			self::TBL_NAME .
-			' ORDER BY version';
-
-		$versions = $migs_db->query($query);
-
-		$this->migrated_versions = array();
-		foreach ($versions as $record)
-		{
-			self::info("Loaded from db: {$record['version']}");
-			$this->migrated_versions[$record['version']] = $record['name'];
-		}
-
-		$this->starting_max = $record;
-	}
-
-	/**
-	 * Call this the *very* first time you use the system to configure your
-	 * default database with the schema_migrations table
-	 */
-	public static function init_schema_table()
-	{
-		/** @var \Box\Echelon\Echelon_Config $configs */
-		$configs = Diesel::create('\Box\Echelon\Echelon_Configs');
-		$default_db_name = $configs->default_database_name();
-
-		$migs_db = Databases::get($default_db_name);
-
-		$sql = '
-		CREATE TABLE IF NOT EXISTS ' . self::TBL_NAME . ' (
-			id INT(10) UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
-			version VARCHAR(22) NOT NULL,
-			name VARCHAR(255) NOT NULL
-		)';
-
-		$migs_db->query($sql);
-	}
-
 	/**
 	 * Run the migration. Either upgrade or rollback the database
 	 * @param  $upgrade
 	 */
 	private function run($upgrade)
 	{
-		$dir = $upgrade ? 'up' : 'down';
-		$migrate_method = 'migrate_' . $dir;
-		$track_method = 'track_version_' . $dir;
+		$direction = $upgrade ? 'up' : 'down';
+		$migrate_method = "migrate_{$direction}";
 
-		$max = $this->starting_max;
-		$this->logger->debug('Database has ' . count($this->migrated_versions) .
-			" migration(s) applied; max is {$max['version']} - {$max['name']}");
-		$this->logger->debug('Found ' . count($this->migrations) . ' migration(s) in migrations/');
-		$this->logger->debug('Determining unapplied/applied migrations');
-		$this->logger->debug("Beginning to migrate $dir");
+		$this->logger->info("Beginning migration starting with {$this->applied_versions}");
+		$this->logger->info('Found ' . count($this->migrations) . " migration(s) in {$this->migrations_dir}/");
 
-		// run each migration in order as necessary
+		$this->logger->debug("Beginning to apply each applicable $direction migration in order");
 		foreach ($this->migrations as $migration)
 		{
 			if ($this->should_skip($upgrade, $migration))
@@ -257,10 +186,11 @@ class Migrator
 			}
 
 			// persist version to db
-			$this->$track_method($migration);
+			$this->applied_versions->track_version_affected($migration);
+			// If we've applied at least one migration, then the schema will have changed
 			$this->dump_schema = true;
 
-			$this->logger->debug("Migrated $dir: version $migration");
+			$this->logger->debug("Migrated $direction: version $migration");
 		}
 
 		$this->logger->debug('Migration complete');
@@ -292,7 +222,7 @@ class Migrator
 	private function should_skip($is_up, Migration_Proxy $migration)
 	{
 		// skip applied migrations on upgrade
-		$is_migrated = array_key_exists($migration->get_version(), $this->migrated_versions);
+		$is_migrated = $this->applied_versions->is_migrated($migration);
 		if ($is_up && $is_migrated)
 		{
 			return true;
@@ -336,39 +266,6 @@ class Migrator
 
 		// Allow rollback to version proceed only if won't exceed allowed limit
 		return $pending_rollback_count <= self::MAX_ROLLBACKS_ALLOWED;
-	}
-
-	/**
-	 * Track migration occurred in db and local store
-	 * @param Migration_Proxy $migration
-	 */
-	private function track_version_up(Migration_Proxy $migration)
-	{
-		$this->logger->trace("Tracking migrate up to {$migration}");
-
-		// @note re-sort? Only if we need to re-display max version
-		$this->migrated_versions[$migration->get_version()] = $migration->get_name();
-
-		$sql = sprintf('INSERT INTO ' . self::TBL_NAME . " (version, name) VALUES ('%s', '%s')",
-			$migration->get_version(), $migration->get_name());
-		$this->db->execute($this->default_db_name, $sql);
-	}
-
-	/**
-	 * Track migration occurred in db and local store
-	 * @param Migration_Proxy $migration
-	 */
-	private function track_version_down(Migration_Proxy $migration)
-	{
-		$this->logger->trace("Tracking rollback of {$migration}");
-
-		// version is no longer applied, remove and reset array
-		unset($this->migrated_versions[$migration->get_version()]);
-
-		$sql = sprintf('DELETE FROM ' . self::TBL_NAME . " WHERE version = '%s'",
-			$migration->get_version());
-
-		$this->db->execute($this->default_db_name, $sql);
 	}
 }
 
