@@ -3,7 +3,7 @@ namespace Box\Echelon\Versions;
 use Bart\Diesel;
 use Bart\Log4PHP;
 use Box\Echelon\Databases;
-use Box\Echelon\Db_Facade;
+use Box\Echelon\Db_Liaison;
 use Box\Echelon\Migration_Proxy;
 
 /**
@@ -19,15 +19,15 @@ abstract class Applied_Versions
 	/** @var \Logger */
 	protected $logger;
 
-	/** @var \Box\Echelon\Db_Facade */
+	/** @var \Box\Echelon\Db_Liaison */
 	protected $db;
 	/** @var array All the versions in the database */
 	protected $migrated_versions = array();
 
 	/**
-	 * @param Db_Facade $db
+	 * @param Db_Liaison $db
 	 */
-	public function __construct(Db_Facade $db)
+	public function __construct(Db_Liaison $db)
 	{
 		$this->logger = Log4PHP::getLogger(get_called_class());
 

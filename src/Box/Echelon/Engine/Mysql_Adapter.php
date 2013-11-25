@@ -1,6 +1,7 @@
 <?php
 namespace Box\Echelon\Engine;
 use Bart\Log4PHP;
+use Box\Echelon\Engine\Mysql\Prepared_Statement;
 
 /**
  * Example adapter for MySQL databases
@@ -28,16 +29,18 @@ class Mysql_Adapter implements Engine_Adapter
 	}
 
 	/**
-	 * @NOTE Not using prepared statements here atm because there isn't a glaring need
-	 * for them in this context and the way they work in PHP out of the box would make
-	 * this code overly complex for the task at hand (DDL, not data, manipulation)
 	 * @param string $query
 	 * @param array $data
 	 * @return mixed Result of running query as prepared statement with data
 	 */
 	public function query_prepared($query, array $data = array())
 	{
-		// TODO: Implement query_prepared() method.
+		$stmt = new Prepared_Statement($this->mysqli, $query, $data);
+
+		// Need to commit this code to Bart still...
+		return \Bart\Loan\Loan::using($stmt, function(Prepared_Statement $stmt) {
+			return $stmt->prepare_and_fetch_as_array();
+		});
 	}
 
 	public function close()

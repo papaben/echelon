@@ -17,7 +17,7 @@ class Migrator
 	 */
 	const MAX_ROLLBACKS_ALLOWED = 2;
 
-	/** @var \Box\Echelon\Db_Facade */
+	/** @var \Box\Echelon\Db_Liaison */
 	private $db;
 	private $show_git_log;
 
@@ -33,9 +33,9 @@ class Migrator
 	protected $migrations_dir;
 
 	/**
-	 * @param Db_Facade $db Wrap access to database
+	 * @param Db_Liaison $db Wrap access to database schemas
 	 */
-	public function __construct(Db_Facade $db, $show_git_log = false)
+	public function __construct(Db_Liaison $db, $show_git_log = false)
 	{
 		$this->logger = Log4PHP::getLogger(__CLASS__);
 

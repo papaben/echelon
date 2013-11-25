@@ -75,26 +75,26 @@ class Migration_Proxy
 	}
 
 	/**
-	 * @param Db_Facade $db_wrapper
+	 * @param Db_Liaison $db_liaison
 	 * @return Migrator_Migration_Base instance of requested migration class
 	 */
-	private function load(Db_Facade $db_wrapper)
+	private function load(Db_Liaison $db_liaison)
 	{
 		$dir = Migrator::get_migrations_dir();
 		require_once $dir . $this->file_name;
 
-		$db_wrapper = $this->tweak_db_wrapper($db_wrapper);
+		$db_liaison = $this->tweak_db_liaison($db_liaison);
 
-		return new $this->name($db_wrapper);
+		return new $this->name($db_liaison);
 	}
 
 	/**
 	 * Perform forward migration
-	 * @param Db_Facade $db_wrapper
+	 * @param Db_Liaison $db_liaison
 	 */
-	public function migrate_up(Db_Facade $db_wrapper)
+	public function migrate_up(Db_Liaison $db_liaison)
 	{
-		$migration = $this->load($db_wrapper);
+		$migration = $this->load($db_liaison);
 		$start_time = microtime(true);
 		$migration->up();
 		$end_time = microtime(true);
@@ -104,25 +104,25 @@ class Migration_Proxy
 
 	/**
 	 * Perform rollback migration
-	 * @param Db_Facade $db_wrapper
+	 * @param Db_Liaison $db_liaison
 	 */
-	public function migrate_down(Db_Facade $db_wrapper)
+	public function migrate_down(Db_Liaison $db_liaison)
 	{
-		$migration = $this->load($db_wrapper);
+		$migration = $this->load($db_liaison);
 		$migration->down();
 	}
 
 	/**
-	 * Run db wrapper through any composition required per migration
+	 * Run db liaison through any composition required per migration
 	 */
-	protected function tweak_db_wrapper(Db_Facade $db_wrapper)
+	protected function tweak_db_liaison(Db_Liaison $db_liaison)
 	{
 		if (self::$analyze)
 		{
-			return new Migrator_Db_Analyzer($this, $db_wrapper);
+			return new Migrator_Db_Analyzer($this, $db_liaison);
 		}
 
-		return $db_wrapper;
+		return $db_liaison;
 	}
 }
 
